@@ -1,6 +1,6 @@
 [package]
 name = "irc-repartee"
-version = "1.3.0"
+version = "1.3.1"
 authors = ["Ariel Weiss <aweiss@hey.com>"]
 edition = "2018"
 rust-version = "1.80"
