@@ -1002,20 +1002,16 @@ impl Outgoing {
             // With args they're 2s. We can't distinguish no-arg vs arg here
             // since the Option is always present in the enum, so we check
             // whether the argument is None/empty.
-            Command::WHO(ref mask, _) => {
-                match mask {
-                    None => 10_000,
-                    Some(m) if m.is_empty() => 10_000,
-                    _ => 2000,
-                }
-            }
-            Command::LIST(ref mask, _) | Command::NAMES(ref mask, _) => {
-                match mask {
-                    None => 10_000,
-                    Some(m) if m.is_empty() => 10_000,
-                    _ => 2000,
-                }
-            }
+            Command::WHO(ref mask, _) => match mask {
+                None => 10_000,
+                Some(m) if m.is_empty() => 10_000,
+                _ => 2000,
+            },
+            Command::LIST(ref mask, _) | Command::NAMES(ref mask, _) => match mask {
+                None => 10_000,
+                Some(m) if m.is_empty() => 10_000,
+                _ => 2000,
+            },
 
             // Other expensive server queries
             Command::WHOIS(..) | Command::WHOWAS(..) => 3000,
@@ -1088,8 +1084,13 @@ impl Future for Outgoing {
             this.drain_penalty();
         }
 
+        // Send the message that was buffered during the delay, then flush
+        // it to TCP immediately. Without this flush, messages accumulate
+        // in the codec buffer across multiple delay cycles and burst all
+        // at once when the stream finally goes idle — causing Excess Flood.
         if let Some(message) = this.buffered.take() {
-            ready!(this.try_start_send(cx, message))?
+            ready!(this.try_start_send(cx, message))?;
+            ready!(Pin::new(&mut this.sink).poll_flush(cx))?;
         }
 
         loop {
@@ -1108,7 +1109,9 @@ impl Future for Outgoing {
                                 let excess = this.penalty - this.penalty_threshold;
                                 log::debug!(
                                     "Flood penalty {}ms exceeds threshold {}ms, delaying {}ms.",
-                                    this.penalty, this.penalty_threshold, excess,
+                                    this.penalty,
+                                    this.penalty_threshold,
+                                    excess,
                                 );
                                 this.delay = Some(Box::pin(tokio::time::sleep(
                                     std::time::Duration::from_millis(excess),
@@ -1119,6 +1122,11 @@ impl Future for Outgoing {
                                 if let Some(ref mut delay) = this.delay {
                                     let _ = delay.as_mut().poll(cx);
                                 }
+                                // Flush any messages already in the codec buffer before
+                                // sleeping. Without this, a non-delayed message sent
+                                // earlier in this poll cycle would stay buffered until
+                                // the delay expires.
+                                ready!(Pin::new(&mut this.sink).poll_flush(cx))?;
                                 return Poll::Pending;
                             }
                         }
