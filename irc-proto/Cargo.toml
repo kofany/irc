@@ -1,12 +1,11 @@
 [package]
-name = "irc-proto"
-version = "1.1.0"
+name = "irc-proto-repartee"
+version = "1.2.0"
 authors = ["Ariel Weiss <aweiss@hey.com>"]
 edition = "2018"
 rust-version = "1.60"
-description = "The IRC protocol distilled."
-documentation = "https://docs.rs/irc-proto/"
-repository = "https://github.com/aatxe/irc"
+description = "The IRC protocol distilled. Temporary fork for repartee IRC client."
+repository = "https://github.com/kofany/irc"
 license = "MPL-2.0"
 keywords = ["irc", "protocol", "tokio"]
 categories = ["network-programming"]
