@@ -1,6 +1,6 @@
 [package]
 name = "irc-repartee"
-version = "1.2.0"
+version = "1.2.1"
 authors = ["Ariel Weiss <aweiss@hey.com>"]
 edition = "2018"
 rust-version = "1.80"
@@ -10,6 +10,13 @@ repository = "https://github.com/kofany/irc"
 license = "MPL-2.0"
 keywords = ["irc", "client", "thread-safe", "async", "tokio"]
 categories = ["asynchronous", "network-programming"]
+exclude = [
+    ".adal/", ".agent/", ".agents/", ".augment/", ".claude/", ".codebuddy/",
+    ".commandcode/", ".continue/", ".crush/", ".factory/", ".goose/", ".iflow/",
+    ".junie/", ".kilocode/", ".kiro/", ".kode/", ".mcpjam/", ".mux/", ".neovate/",
+    ".openhands/", ".pi/", ".pochi/", ".qoder/", ".qwen/", ".roo/", ".trae/",
+    ".vibe/", ".windsurf/", ".zencoder/", "memory.db*", "skills-lock.json",
+]
 
 
 [badges]
