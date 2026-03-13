@@ -897,6 +897,8 @@ pub struct Client {
     incoming: Option<SplitStream<Connection>>,
     outgoing: Option<Outgoing>,
     sender: Sender,
+    /// The local socket address of the TCP connection, if available.
+    local_addr: Option<std::net::SocketAddr>,
     #[cfg(test)]
     /// A view of the logs for a mock connection.
     view: Option<self::transport::LogView>,
@@ -928,6 +930,8 @@ impl Client {
         let (tx_outgoing, rx_outgoing) = mpsc::unbounded_channel();
         let conn = Connection::new(&config, tx_outgoing.clone()).await?;
 
+        let local_addr = conn.local_addr();
+
         #[cfg(test)]
         let view = conn.log_view();
 
@@ -944,6 +948,7 @@ impl Client {
                 stream: rx_outgoing,
                 buffered: None,
             }),
+            local_addr,
             #[cfg(test)]
             view,
         })
@@ -1050,6 +1055,16 @@ impl Client {
     /// preferred way to refer to the client's nickname.
     pub fn current_nickname(&self) -> &str {
         self.state.current_nickname()
+    }
+
+    /// Returns the local socket address of the underlying TCP connection.
+    ///
+    /// This is useful for determining the client's own IP address as seen by the
+    /// local network stack, for example when implementing DCC or CTCP.
+    ///
+    /// Returns `None` for mock connections or if the address could not be determined.
+    pub fn local_addr(&self) -> Option<std::net::SocketAddr> {
+        self.local_addr
     }
 
     /// Sends a [`Command`] as this `Client`. This is the
@@ -1972,6 +1987,13 @@ mod test {
             &get_client_value(client)[..],
             "PRIVMSG test \u{001}TIME\u{001}\r\n"
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn local_addr_is_none_for_mock() -> Result<()> {
+        let client = Client::from_config(test_config()).await?;
+        assert_eq!(client.local_addr(), None);
         Ok(())
     }
 }

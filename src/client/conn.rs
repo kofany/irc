@@ -3,6 +3,7 @@ use futures_util::{sink::Sink, stream::Stream};
 use pin_project::pin_project;
 use std::{
     fmt,
+    net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -59,10 +60,10 @@ use crate::{
 #[pin_project(project = ConnectionProj)]
 pub enum Connection {
     #[doc(hidden)]
-    Unsecured(#[pin] Transport<TcpStream>),
+    Unsecured(#[pin] Transport<TcpStream>, Option<SocketAddr>),
     #[doc(hidden)]
     #[cfg(any(feature = "tls-native", feature = "tls-rust"))]
-    Secured(#[pin] Transport<TlsStream<TcpStream>>),
+    Secured(#[pin] Transport<TlsStream<TcpStream>>, Option<SocketAddr>),
     #[doc(hidden)]
     Mock(#[pin] Logged<MockStream>),
 }
@@ -73,9 +74,9 @@ impl fmt::Debug for Connection {
             f,
             "{}",
             match *self {
-                Connection::Unsecured(_) => "Connection::Unsecured(...)",
+                Connection::Unsecured(..) => "Connection::Unsecured(...)",
                 #[cfg(any(feature = "tls-native", feature = "tls-rust"))]
-                Connection::Secured(_) => "Connection::Secured(...)",
+                Connection::Secured(..) => "Connection::Secured(...)",
                 Connection::Mock(_) => "Connection::Mock(...)",
             }
         )
@@ -95,19 +96,24 @@ impl Connection {
             )));
         }
 
+        let stream = Self::new_stream(config).await?;
+        let local_addr = stream.local_addr().ok();
+
         #[cfg(any(feature = "tls-native", feature = "tls-rust"))]
         {
             if config.use_tls() {
                 log::info!("Connecting via TLS to {}.", config.server()?);
                 return Ok(Connection::Secured(
-                    Self::new_secured_transport(config, tx).await?,
+                    Self::new_secured_transport(config, stream, tx).await?,
+                    local_addr,
                 ));
             }
         }
 
         log::info!("Connecting to {}.", config.server()?);
         Ok(Connection::Unsecured(
-            Self::new_unsecured_transport(config, tx).await?,
+            Self::new_unsecured_transport(config, stream, tx).await?,
+            local_addr,
         ))
     }
 
@@ -151,9 +157,9 @@ impl Connection {
 
     async fn new_unsecured_transport(
         config: &Config,
+        stream: TcpStream,
         tx: UnboundedSender<Message>,
     ) -> error::Result<Transport<TcpStream>> {
-        let stream = Self::new_stream(config).await?;
         let framed = Framed::new(stream, IrcCodec::new(config.encoding())?);
 
         Ok(Transport::new(config, framed, tx))
@@ -162,6 +168,7 @@ impl Connection {
     #[cfg(all(feature = "tls-native", not(feature = "tls-rust")))]
     async fn new_secured_transport(
         config: &Config,
+        stream: TcpStream,
         tx: UnboundedSender<Message>,
     ) -> error::Result<Transport<TlsStream<TcpStream>>> {
         let mut builder = TlsConnector::builder();
@@ -211,7 +218,6 @@ impl Connection {
         let connector: tokio_native_tls::TlsConnector = builder.build()?.into();
         let domain = config.server()?;
 
-        let stream = Self::new_stream(config).await?;
         let stream = connector.connect(domain, stream).await?;
         let framed = Framed::new(stream, IrcCodec::new(config.encoding())?);
 
@@ -221,6 +227,7 @@ impl Connection {
     #[cfg(feature = "tls-rust")]
     async fn new_secured_transport(
         config: &Config,
+        stream: TcpStream,
         tx: UnboundedSender<Message>,
     ) -> error::Result<Transport<TlsStream<TcpStream>>> {
         #[derive(Debug)]
@@ -380,7 +387,6 @@ impl Connection {
 
         let connector = TlsConnector::from(Arc::new(tls_config));
         let domain = ServerName::try_from(config.server()?)?.to_owned();
-        let stream = Self::new_stream(config).await?;
         let stream = connector.connect(domain, stream).await?;
         let framed = Framed::new(stream, IrcCodec::new(config.encoding())?);
 
@@ -422,6 +428,18 @@ impl Connection {
         Ok(Transport::new(config, framed, tx))
     }
 
+    /// Returns the local socket address of the underlying TCP connection, if available.
+    ///
+    /// Returns `None` for mock connections or if the address could not be determined.
+    pub fn local_addr(&self) -> Option<SocketAddr> {
+        match *self {
+            Connection::Unsecured(_, addr) => addr,
+            #[cfg(any(feature = "tls-native", feature = "tls-rust"))]
+            Connection::Secured(_, addr) => addr,
+            Connection::Mock(_) => None,
+        }
+    }
+
     /// Gets a view of the internal logging if and only if this connection is using a mock stream.
     /// Otherwise, this will always return `None`. This is used for unit testing.
     pub fn log_view(&self) -> Option<LogView> {
@@ -437,9 +455,9 @@ impl Stream for Connection {
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.project() {
-            ConnectionProj::Unsecured(inner) => inner.poll_next(cx),
+            ConnectionProj::Unsecured(inner, _) => inner.poll_next(cx),
             #[cfg(any(feature = "tls-native", feature = "tls-rust"))]
-            ConnectionProj::Secured(inner) => inner.poll_next(cx),
+            ConnectionProj::Secured(inner, _) => inner.poll_next(cx),
             ConnectionProj::Mock(inner) => inner.poll_next(cx),
         }
     }
@@ -450,36 +468,36 @@ impl Sink<Message> for Connection {
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match self.project() {
-            ConnectionProj::Unsecured(inner) => inner.poll_ready(cx),
+            ConnectionProj::Unsecured(inner, _) => inner.poll_ready(cx),
             #[cfg(any(feature = "tls-native", feature = "tls-rust"))]
-            ConnectionProj::Secured(inner) => inner.poll_ready(cx),
+            ConnectionProj::Secured(inner, _) => inner.poll_ready(cx),
             ConnectionProj::Mock(inner) => inner.poll_ready(cx),
         }
     }
 
     fn start_send(self: Pin<&mut Self>, item: Message) -> Result<(), Self::Error> {
         match self.project() {
-            ConnectionProj::Unsecured(inner) => inner.start_send(item),
+            ConnectionProj::Unsecured(inner, _) => inner.start_send(item),
             #[cfg(any(feature = "tls-native", feature = "tls-rust"))]
-            ConnectionProj::Secured(inner) => inner.start_send(item),
+            ConnectionProj::Secured(inner, _) => inner.start_send(item),
             ConnectionProj::Mock(inner) => inner.start_send(item),
         }
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match self.project() {
-            ConnectionProj::Unsecured(inner) => inner.poll_flush(cx),
+            ConnectionProj::Unsecured(inner, _) => inner.poll_flush(cx),
             #[cfg(any(feature = "tls-native", feature = "tls-rust"))]
-            ConnectionProj::Secured(inner) => inner.poll_flush(cx),
+            ConnectionProj::Secured(inner, _) => inner.poll_flush(cx),
             ConnectionProj::Mock(inner) => inner.poll_flush(cx),
         }
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match self.project() {
-            ConnectionProj::Unsecured(inner) => inner.poll_close(cx),
+            ConnectionProj::Unsecured(inner, _) => inner.poll_close(cx),
             #[cfg(any(feature = "tls-native", feature = "tls-rust"))]
-            ConnectionProj::Secured(inner) => inner.poll_close(cx),
+            ConnectionProj::Secured(inner, _) => inner.poll_close(cx),
             ConnectionProj::Mock(inner) => inner.poll_close(cx),
         }
     }
