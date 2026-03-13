@@ -1156,6 +1156,8 @@ pub struct Client {
     incoming: Option<SplitStream<Connection>>,
     outgoing: Option<Outgoing>,
     sender: Sender,
+    /// The local socket address of the TCP connection, if available.
+    local_addr: Option<std::net::SocketAddr>,
     #[cfg(test)]
     /// A view of the logs for a mock connection.
     view: Option<self::transport::LogView>,
@@ -1187,6 +1189,8 @@ impl Client {
         let (tx_outgoing, rx_outgoing) = mpsc::unbounded_channel();
         let conn = Connection::new(&config, tx_outgoing.clone()).await?;
 
+        let local_addr = conn.local_addr();
+
         #[cfg(test)]
         let view = conn.log_view();
 
@@ -1208,6 +1212,7 @@ impl Client {
                 last_penalty_check: tokio::time::Instant::now(),
                 delay: None,
             }),
+            local_addr,
             #[cfg(test)]
             view,
         })
@@ -1326,6 +1331,16 @@ impl Client {
         self.state.current_nickname()
     }
 
+    /// Returns the local socket address of the underlying TCP connection.
+    ///
+    /// This is useful for determining the client's own IP address as seen by the
+    /// local network stack, for example when implementing DCC or CTCP.
+    ///
+    /// Returns `None` for mock connections or if the address could not be determined.
+    pub fn local_addr(&self) -> Option<std::net::SocketAddr> {
+        self.local_addr
+    }
+
     /// Sends a [`Command`] as this `Client`. This is the
     /// core primitive for sending messages to the server.
     ///
@@ -1437,10 +1452,7 @@ mod test {
         })
         .await?;
         client.stream()?.collect().await?;
-        assert_eq!(
-            &get_client_value(client).await[..],
-            "JOIN #test,#test2\r\n"
-        );
+        assert_eq!(&get_client_value(client).await[..], "JOIN #test,#test2\r\n");
         Ok(())
     }
 
@@ -2122,7 +2134,10 @@ mod test {
         let mut client = Client::from_config(test_config()).await?;
         client.send_samode("#test", "+o", "test")?;
         client.stream()?.collect().await?;
-        assert_eq!(&get_client_value(client).await[..], "SAMODE #test +o test\r\n");
+        assert_eq!(
+            &get_client_value(client).await[..],
+            "SAMODE #test +o test\r\n"
+        );
         Ok(())
     }
 
@@ -2245,6 +2260,13 @@ mod test {
             &get_client_value(client).await[..],
             "PRIVMSG test \u{001}TIME\u{001}\r\n"
         );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn local_addr_is_none_for_mock() -> Result<()> {
+        let client = Client::from_config(test_config()).await?;
+        assert_eq!(client.local_addr(), None);
         Ok(())
     }
 
