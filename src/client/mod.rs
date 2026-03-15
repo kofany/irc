@@ -122,6 +122,7 @@ macro_rules! pub_state_base {
         }
 
         /// Sends a notice to the specified target.
+        #[allow(dead_code)]
         pub fn send_notice<S1, S2>(&self, target: S1, message: S2) -> error::Result<()>
         where
             S1: fmt::Display,
