@@ -1,10 +1,10 @@
 [package]
 name = "irc-repartee"
-version = "1.4.0"
+version = "1.5.0"
 authors = ["Ariel Weiss <aweiss@hey.com>"]
 edition = "2018"
 rust-version = "1.80"
-description = "the irc crate – usable, async IRC for Rust. Temporary fork for repartee IRC client (bind_address, immediate flush, rustls fix, flood protection, batched autojoin, local_addr)."
+description = "the irc crate – usable, async IRC for Rust. Temporary fork for repartee IRC client (bind_address, immediate flush, rustls fix, flood protection, batched autojoin, local_addr, outgoing task handle)."
 readme = "README.md"
 repository = "https://github.com/kofany/irc"
 license = "MPL-2.0"
@@ -62,7 +62,7 @@ futures-util = { version = "0.3.30", default-features = false, features = [
     "alloc",
     "sink",
 ] }
-irc-proto = { version = "1.2.0", package = "irc-proto-repartee", path = "irc-proto" }
+irc-proto = { version = "1.2.1", package = "irc-proto-repartee", path = "irc-proto" }
 log = "0.4.21"
 parking_lot = "0.12.1"
 thiserror = "1.0.58"

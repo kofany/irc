@@ -1159,6 +1159,10 @@ pub struct Client {
     sender: Sender,
     /// The local socket address of the TCP connection, if available.
     local_addr: Option<std::net::SocketAddr>,
+    /// Handle to the spawned outgoing message task.
+    /// Stored by `stream()` so callers can abort it on disconnect
+    /// to prevent CLOSE-WAIT socket leaks.
+    pub outgoing_handle: Option<tokio::task::JoinHandle<()>>,
     #[cfg(test)]
     /// A view of the logs for a mock connection.
     view: Option<self::transport::LogView>,
@@ -1214,6 +1218,7 @@ impl Client {
                 delay: None,
             }),
             local_addr,
+            outgoing_handle: None,
             #[cfg(test)]
             view,
         })
@@ -1240,6 +1245,18 @@ impl Client {
         self.sender.clone()
     }
 
+    /// Abort the spawned outgoing message handler task.
+    ///
+    /// Call this when the connection is being torn down to prevent
+    /// CLOSE-WAIT socket leaks.  The `Pinger` inside `Outgoing` holds a
+    /// `tx_outgoing` clone that keeps the write half of the TCP socket
+    /// alive even after all external `Sender` clones are dropped.
+    pub fn abort_outgoing(&mut self) {
+        if let Some(handle) = self.outgoing_handle.take() {
+            handle.abort();
+        }
+    }
+
     /// Gets the configuration being used with this `Client`.
     fn config(&self) -> &Config {
         &self.state.config
@@ -1260,13 +1277,16 @@ impl Client {
 
         // Spawn the outgoing message handler as an independent task so that
         // sent messages are flushed immediately, rather than waiting for the
-        // incoming stream to be polled.
+        // incoming stream to be polled.  The JoinHandle is stored so callers
+        // can abort it on disconnect — the Pinger inside Outgoing holds a
+        // tx_outgoing clone that would otherwise keep the channel open and
+        // the write half of the TLS socket alive (CLOSE-WAIT leak).
         if let Some(outgoing) = self.outgoing.take() {
-            tokio::spawn(async move {
+            self.outgoing_handle = Some(tokio::spawn(async move {
                 if let Err(e) = outgoing.await {
                     log::error!("error in outgoing message handler: {}", e);
                 }
-            });
+            }));
         }
 
         Ok(ClientStream {
