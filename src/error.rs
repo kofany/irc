@@ -75,7 +75,7 @@ pub enum Error {
     /// Error for invalid configurations.
     #[error("invalid config: {}", path)]
     InvalidConfig {
-        /// The path to the configuration, or "<none>" if none specified.
+        /// The path to the configuration, or `"<none>"` if none specified.
         path: String,
         /// The detailed configuration error.
         #[source]

@@ -17,11 +17,11 @@
 //! # Example
 //!
 //! ```no_run
-//! use irc::client::prelude::*;
+//! use irc_repartee::client::prelude::*;
 //! use futures::prelude::*;
 //!
 //! # #[tokio::main]
-//! # async fn main() -> irc::error::Result<()> {
+//! # async fn main() -> irc_repartee::error::Result<()> {
 //! // configuration is loaded from config.toml into a Config
 //! let mut client = Client::new("config.toml").await?;
 //! // identify comes from ClientExt

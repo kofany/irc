@@ -35,8 +35,8 @@ use crate::error::{ConfigError, Result};
 /// as below will ensure that this process is handled correctly.
 ///
 /// ```
-/// # extern crate irc;
-/// use irc::client::prelude::Config;
+/// # extern crate irc_repartee;
+/// use irc_repartee::client::prelude::Config;
 ///
 /// # fn main() {
 /// let config = Config {
@@ -61,8 +61,8 @@ use crate::error::{ConfigError, Result};
 ///
 /// ## Rust
 /// ```no_run
-/// # extern crate irc;
-/// use irc::client::prelude::Config;
+/// # extern crate irc_repartee;
+/// use irc_repartee::client::prelude::Config;
 ///
 /// # fn main() {
 /// let config = Config::load("config.toml").unwrap();

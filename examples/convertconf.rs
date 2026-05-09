@@ -3,6 +3,8 @@ use std::process::exit;
 
 use args::{Args, ArgsError};
 use getopts::Occur;
+use irc_repartee as irc;
+
 use irc::client::data::Config;
 
 const PROGRAM_DESC: &str = "Use this program to convert configs between {JSON, TOML, YAML}.";

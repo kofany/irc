@@ -1,4 +1,5 @@
 use irc::client::prelude::*;
+use irc_repartee as irc;
 use std::time::Duration;
 use tokio_stream::StreamExt as _;
 

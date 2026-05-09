@@ -1,8 +1,8 @@
 //! A feature which allow us to connect to IRC via a proxy.
 //!
 //! ```
-//! use irc::client::prelude::Config;
-//! use irc::client::data::ProxyType;
+//! use irc_repartee::client::prelude::Config;
+//! use irc_repartee::client::data::ProxyType;
 //!
 //! # fn main() {
 //! let config = Config {

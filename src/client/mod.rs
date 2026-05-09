@@ -11,11 +11,11 @@
 //! identifying with the server).
 //!
 //! ```no_run
-//! # extern crate irc;
-//! use irc::client::prelude::Client;
+//! # extern crate irc_repartee;
+//! use irc_repartee::client::prelude::Client;
 //!
 //! # #[tokio::main]
-//! # async fn main() -> irc::error::Result<()> {
+//! # async fn main() -> irc_repartee::error::Result<()> {
 //! let client = Client::new("config.toml").await?;
 //! client.identify()?;
 //! # Ok(())
@@ -27,11 +27,11 @@
 //! performs a simple call-and-response when the bot's name is mentioned in a channel.
 //!
 //! ```no_run
-//! use irc::client::prelude::*;
+//! use irc_repartee::client::prelude::*;
 //! use futures::*;
 //!
 //! # #[tokio::main]
-//! # async fn main() -> irc::error::Result<()> {
+//! # async fn main() -> irc_repartee::error::Result<()> {
 //! let mut client = Client::new("config.toml").await?;
 //! let mut stream = client.stream()?;
 //! client.identify()?;
@@ -366,7 +366,7 @@ macro_rules! pub_sender_base {
         /// Sends a finger request to the specified target.
         /// This requires the CTCP feature to be enabled.
         #[cfg(feature = "ctcp")]
-        pub fn send_finger<S: fmt::Display>(&self, target: S) -> error::Result<()>
+        pub fn send_finger<S>(&self, target: S) -> error::Result<()>
         where
             S: fmt::Display,
         {
@@ -525,7 +525,7 @@ impl ClientState {
 
     /// Handles sent messages internally for basic client functionality.
     fn handle_sent_message(&self, msg: &Message) -> error::Result<()> {
-        log::trace!("[SENT] {}", msg.to_string());
+        log::trace!("[SENT] {}", msg);
 
         if let PART(ref chan, _) = msg.command {
             let _ = self.chanlists.write().remove(chan);
@@ -536,7 +536,7 @@ impl ClientState {
 
     /// Handles received messages internally for basic client functionality.
     fn handle_message(&self, msg: &Message) -> error::Result<()> {
-        log::trace!("[RECV] {}", msg.to_string());
+        log::trace!("[RECV] {}", msg);
         match msg.command {
             JOIN(ref chan, _, _) => self.handle_join(msg.source_nickname().unwrap_or(""), chan),
             PART(ref chan, _) => self.handle_part(msg.source_nickname().unwrap_or(""), chan),
@@ -757,7 +757,7 @@ impl ClientState {
                 self.chanlists
                     .write()
                     .entry(chan.clone())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(User::new(user))
             }
         }
@@ -963,6 +963,12 @@ impl Sender {
 pub struct Outgoing {
     sink: SplitSink<Connection, Message>,
     stream: UnboundedReceiver<Message>,
+    /// Priority lane for messages the throttle must not delay.
+    ///
+    /// Internal PINGs use this lane so paste bursts in the regular queue cannot
+    /// starve the pinger long enough to trip `ping_timeout`.
+    priority_stream: UnboundedReceiver<Message>,
+    priority_buffered: Option<Message>,
     buffered: Option<Message>,
     /// Accumulated penalty in milliseconds.
     penalty: u64,
@@ -1062,6 +1068,39 @@ impl Outgoing {
             }
         }
     }
+
+    fn try_start_send_priority(
+        &mut self,
+        cx: &mut Context<'_>,
+        message: Message,
+    ) -> Poll<Result<(), error::Error>> {
+        debug_assert!(self.priority_buffered.is_none());
+
+        match Pin::new(&mut self.sink).poll_ready(cx)? {
+            Poll::Ready(()) => Poll::Ready(Pin::new(&mut self.sink).start_send(message)),
+            Poll::Pending => {
+                self.priority_buffered = Some(message);
+                Poll::Pending
+            }
+        }
+    }
+
+    fn poll_priority_message(&mut self, cx: &mut Context<'_>) -> Poll<Result<bool, error::Error>> {
+        if let Some(message) = self.priority_buffered.take() {
+            ready!(self.try_start_send_priority(cx, message))?;
+            ready!(Pin::new(&mut self.sink).poll_flush(cx))?;
+            return Poll::Ready(Ok(true));
+        }
+
+        match self.priority_stream.poll_recv(cx) {
+            Poll::Ready(Some(message)) => {
+                ready!(self.try_start_send_priority(cx, message))?;
+                ready!(Pin::new(&mut self.sink).poll_flush(cx))?;
+                Poll::Ready(Ok(true))
+            }
+            Poll::Ready(None) | Poll::Pending => Poll::Ready(Ok(false)),
+        }
+    }
 }
 
 impl FusedFuture for Outgoing {
@@ -1078,6 +1117,11 @@ impl Future for Outgoing {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = &mut *self;
 
+        if ready!(this.poll_priority_message(cx))? {
+            cx.waker().wake_by_ref();
+            return Poll::Pending;
+        }
+
         // If we're waiting on a throttle delay, poll it first.
         if let Some(ref mut delay) = this.delay {
             ready!(delay.as_mut().poll(cx));
@@ -1092,6 +1136,11 @@ impl Future for Outgoing {
         if let Some(message) = this.buffered.take() {
             ready!(this.try_start_send(cx, message))?;
             ready!(Pin::new(&mut this.sink).poll_flush(cx))?;
+        }
+
+        if ready!(this.poll_priority_message(cx))? {
+            cx.waker().wake_by_ref();
+            return Poll::Pending;
         }
 
         loop {
@@ -1149,7 +1198,7 @@ impl Future for Outgoing {
 
 /// The canonical implementation of a connection to an IRC server.
 ///
-/// For a full example usage, see [`irc::client`].
+/// For a full example usage, see [`crate::client`].
 #[derive(Debug)]
 pub struct Client {
     /// The internal, thread-safe server state.
@@ -1175,9 +1224,9 @@ impl Client {
     ///
     /// # Example
     /// ```no_run
-    /// # use irc::client::prelude::*;
+    /// # use irc_repartee::client::prelude::*;
     /// # #[tokio::main]
-    /// # async fn main() -> irc::error::Result<()> {
+    /// # async fn main() -> irc_repartee::error::Result<()> {
     /// let client = Client::new("config.toml").await?;
     /// # Ok(())
     /// # }
@@ -1192,7 +1241,8 @@ impl Client {
     /// handling. Connection will not occur until the event loop is run.
     pub async fn from_config(config: Config) -> error::Result<Client> {
         let (tx_outgoing, rx_outgoing) = mpsc::unbounded_channel();
-        let conn = Connection::new(&config, tx_outgoing.clone()).await?;
+        let (tx_priority_outgoing, rx_priority_outgoing) = mpsc::unbounded_channel();
+        let conn = Connection::new(&config, tx_priority_outgoing).await?;
 
         let local_addr = conn.local_addr();
 
@@ -1211,6 +1261,8 @@ impl Client {
             outgoing: Some(Outgoing {
                 sink,
                 stream: rx_outgoing,
+                priority_stream: rx_priority_outgoing,
+                priority_buffered: None,
                 buffered: None,
                 penalty: 0,
                 penalty_threshold,
@@ -1315,7 +1367,7 @@ impl Client {
         None
     }
 
-    /// Gets a list of [`Users`] in the specified channel. If the
+    /// Gets a list of [`User`]s in the specified channel. If the
     /// specified channel hasn't been joined or the `channel-lists` feature is disabled, this function
     /// will return `None`.
     ///
@@ -1323,11 +1375,11 @@ impl Client {
     /// for more accurate tracking of user rank (e.g. oper, half-op, etc.).
     /// # Requesting multi-prefix support
     /// ```no_run
-    /// # use irc::client::prelude::*;
-    /// use irc::proto::caps::Capability;
+    /// # use irc_repartee::client::prelude::*;
+    /// use irc_repartee::proto::caps::Capability;
     ///
     /// # #[tokio::main]
-    /// # async fn main() -> irc::error::Result<()> {
+    /// # async fn main() -> irc_repartee::error::Result<()> {
     /// # let client = Client::new("config.toml").await?;
     /// client.send_cap_req(&[Capability::MultiPrefix])?;
     /// client.identify()?;
@@ -1367,7 +1419,7 @@ impl Client {
     ///
     /// # Example
     /// ```no_run
-    /// # use irc::client::prelude::*;
+    /// # use irc_repartee::client::prelude::*;
     /// # #[tokio::main]
     /// # async fn main() {
     /// # let client = Client::new("config.toml").await.unwrap();
@@ -1403,19 +1455,24 @@ impl Client {
 mod test {
     use std::{collections::HashMap, default::Default, time::Duration};
 
-    use super::{Client, ClientState};
+    use super::{Client, ClientState, Outgoing};
     #[cfg(feature = "channel-lists")]
     use crate::client::data::User;
     use crate::{
         client::data::Config,
         error::Error,
         proto::{
-            command::Command::{Raw, PRIVMSG},
-            ChannelMode, IrcCodec, Mode, UserMode,
+            command::Command::{Raw, PING, PONG, PRIVMSG},
+            ChannelMode, IrcCodec, Message, Mode, UserMode,
         },
     };
     use anyhow::Result;
     use futures::prelude::*;
+    use tokio::{
+        net::TcpListener,
+        sync::{mpsc::UnboundedSender, oneshot},
+    };
+    use tokio_util::codec::Framed;
 
     pub fn test_config() -> Config {
         Config {
@@ -1446,6 +1503,151 @@ mod test {
                 acc.push_str(&IrcCodec::sanitize(msg.to_string()));
                 acc
             })
+    }
+
+    fn test_outgoing(
+        penalty_threshold: u64,
+    ) -> Result<(
+        Outgoing,
+        UnboundedSender<Message>,
+        UnboundedSender<Message>,
+        super::transport::LogView,
+    )> {
+        let config = test_config();
+        let (tx_outgoing, rx_outgoing) = tokio::sync::mpsc::unbounded_channel();
+        let (tx_priority_outgoing, rx_priority_outgoing) = tokio::sync::mpsc::unbounded_channel();
+        let (tx_pinger, _rx_pinger) = tokio::sync::mpsc::unbounded_channel();
+        let framed = Framed::new(
+            super::mock::MockStream::empty(),
+            IrcCodec::new(config.encoding())?,
+        );
+        let conn = super::conn::Connection::Mock(super::transport::Logged::wrap(
+            super::transport::Transport::new(&config, framed, tx_pinger),
+        ));
+        let view = conn
+            .log_view()
+            .expect("mock connection should expose a log view");
+        let (sink, _incoming) = conn.split();
+
+        Ok((
+            Outgoing {
+                sink,
+                stream: rx_outgoing,
+                priority_stream: rx_priority_outgoing,
+                priority_buffered: None,
+                buffered: None,
+                penalty: 0,
+                penalty_threshold,
+                last_penalty_check: tokio::time::Instant::now(),
+                delay: None,
+            },
+            tx_outgoing,
+            tx_priority_outgoing,
+            view,
+        ))
+    }
+
+    async fn wait_for_sent_command<F>(
+        view: &super::transport::LogView,
+        mut predicate: F,
+    ) -> Result<Message>
+    where
+        F: FnMut(&Message) -> bool,
+    {
+        tokio::time::timeout(Duration::from_millis(100), async {
+            loop {
+                if let Some(message) = view.sent()?.iter().find(|msg| predicate(msg)).cloned() {
+                    return Ok(message);
+                }
+
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await?
+    }
+
+    #[tokio::test]
+    async fn priority_message_skips_throttle_delay() -> Result<()> {
+        let (outgoing, tx_outgoing, tx_priority_outgoing, view) = test_outgoing(10_000)?;
+        let handle = tokio::spawn(outgoing);
+        let payload = "x".repeat(350);
+
+        tx_outgoing.send(PRIVMSG("#test".to_owned(), payload.clone()).into())?;
+        tx_outgoing.send(PRIVMSG("#test".to_owned(), payload).into())?;
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        tx_priority_outgoing.send(PING("priority".to_owned(), None).into())?;
+        wait_for_sent_command(&view, |msg| matches!(&msg.command, PING(..))).await?;
+
+        handle.abort();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn paste_burst_does_not_starve_ping() -> Result<()> {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
+        let port = listener.local_addr()?.port();
+        let (tx_ping_seen, rx_ping_seen) = oneshot::channel();
+
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await?;
+            let mut framed = Framed::new(socket, IrcCodec::new("UTF-8")?);
+            framed
+                .send(Message::new(
+                    Some("irc.test.net"),
+                    "376",
+                    vec!["test", "End of /MOTD command."],
+                )?)
+                .await?;
+
+            let mut tx_ping_seen = Some(tx_ping_seen);
+            while let Some(message) = framed.next().await {
+                let message = message?;
+                if let PING(ref data, _) = message.command {
+                    if let Some(tx_ping_seen) = tx_ping_seen.take() {
+                        let _ = tx_ping_seen.send(message.to_string());
+                    }
+                    framed.send(PONG(data.to_owned(), None).into()).await?;
+                }
+            }
+
+            Ok::<(), anyhow::Error>(())
+        });
+
+        let mut config = test_config();
+        config.server = Some("127.0.0.1".to_owned());
+        config.port = Some(port);
+        config.use_tls = Some(false);
+        config.use_mock_connection = false;
+        config.channels = vec![];
+        config.ping_time = Some(1);
+        config.ping_timeout = Some(2);
+        config.flood_penalty_threshold = Some(10_000);
+
+        let mut client = Client::from_config(config).await?;
+        let sender = client.sender();
+        let mut stream = client.stream()?;
+        let reader = tokio::spawn(async move {
+            while stream.next().await.transpose()?.is_some() {}
+            Ok::<(), Error>(())
+        });
+
+        let payload = "x".repeat(350);
+        for _ in 0..50 {
+            sender.send_privmsg("#test", &payload)?;
+        }
+
+        let ping = tokio::time::timeout(Duration::from_secs(3), rx_ping_seen).await??;
+        assert!(ping.starts_with("PING "));
+        assert!(
+            !reader.is_finished(),
+            "stream ended before PING was answered"
+        );
+
+        reader.abort();
+        client.abort_outgoing();
+        server.abort();
+        Ok(())
     }
 
     #[tokio::test]

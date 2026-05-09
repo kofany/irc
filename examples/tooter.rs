@@ -1,4 +1,5 @@
 use irc::client::prelude::*;
+use irc_repartee as irc;
 use std::time::Duration;
 
 // NOTE: this example is a conversion of `tweeter.rs` to an asynchronous style with `IrcReactor`.

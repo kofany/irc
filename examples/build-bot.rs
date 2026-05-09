@@ -1,4 +1,4 @@
-extern crate irc;
+extern crate irc_repartee as irc;
 
 use futures::prelude::*;
 use irc::client::prelude::*;

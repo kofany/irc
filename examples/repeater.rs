@@ -1,5 +1,6 @@
 use futures::prelude::*;
 use irc::client::prelude::*;
+use irc_repartee as irc;
 
 #[tokio::main]
 async fn main() -> irc::error::Result<()> {
@@ -7,8 +8,6 @@ async fn main() -> irc::error::Result<()> {
         nickname: Some("pickles".to_owned()),
         server: Some("chat.freenode.net".to_owned()),
         channels: vec!["#rust-spam".to_owned()],
-        burst_window_length: Some(4),
-        max_messages_in_burst: Some(4),
         ..Default::default()
     };
 

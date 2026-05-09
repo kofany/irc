@@ -1,5 +1,6 @@
 use futures::prelude::*;
 use irc::client::prelude::*;
+use irc_repartee as irc;
 
 #[tokio::main]
 async fn main() -> irc::error::Result<()> {

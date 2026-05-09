@@ -58,6 +58,7 @@ use crate::{
 
 /// An IRC connection used internally by `IrcServer`.
 #[pin_project(project = ConnectionProj)]
+#[allow(clippy::large_enum_variant)]
 pub enum Connection {
     #[doc(hidden)]
     Unsecured(#[pin] Transport<TcpStream>, Option<SocketAddr>),
@@ -309,7 +310,7 @@ impl Connection {
                 _oscp: &[u8],
                 _now: UnixTime,
             ) -> Result<ServerCertVerified, rustls::Error> {
-                return Ok(ServerCertVerified::assertion());
+                Ok(ServerCertVerified::assertion())
             }
 
             fn verify_tls12_signature(
@@ -413,7 +414,7 @@ impl Connection {
 
             let native_certs = rustls_native_certs::load_native_certs();
             for cert in native_certs.certs {
-                root_store.add(cert.into())?;
+                root_store.add(cert)?;
             }
 
             if let Some(cert_path) = config.cert_path() {
