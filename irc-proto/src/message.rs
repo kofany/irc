@@ -32,8 +32,8 @@ impl Message {
     ///
     /// # Example
     /// ```
-    /// # extern crate irc_proto;
-    /// # use irc_proto::Message;
+    /// # extern crate irc_proto_repartee;
+    /// # use irc_proto_repartee::Message;
     /// # fn main() {
     /// let message = Message::new(
     ///     Some("nickname!username@hostname"), "JOIN", vec!["#channel"]
@@ -68,8 +68,8 @@ impl Message {
     ///
     /// # Example
     /// ```
-    /// # extern crate irc_proto;
-    /// # use irc_proto::Message;
+    /// # extern crate irc_proto_repartee;
+    /// # use irc_proto_repartee::Message;
     /// # fn main() {
     /// let message = Message::new(
     ///     Some("nickname!username@hostname"), "JOIN", vec!["#channel"]
@@ -92,8 +92,8 @@ impl Message {
     ///
     /// # Example
     /// ```
-    /// # extern crate irc_proto;
-    /// # use irc_proto::Message;
+    /// # extern crate irc_proto_repartee;
+    /// # use irc_proto_repartee::Message;
     /// # fn main() {
     /// let msg1 = Message::new(
     ///     Some("ada"), "PRIVMSG", vec!["#channel", "Hi, everyone!"]
@@ -228,8 +228,8 @@ impl Display for Message {
     ///
     /// # Example
     /// ```
-    /// # extern crate irc_proto;
-    /// # use irc_proto::Message;
+    /// # extern crate irc_proto_repartee;
+    /// # use irc_proto_repartee::Message;
     /// # fn main() {
     /// let msg = Message::new(
     ///     Some("ada"), "PRIVMSG", vec!["#channel", "Hi, everyone!"]

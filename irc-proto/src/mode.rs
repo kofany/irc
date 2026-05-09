@@ -101,6 +101,8 @@ pub enum ChannelMode {
     InviteOnly,
     /// I - exception to invite-only rule
     InviteException,
+    /// R - reop list entry
+    Reop,
     /// k - specify channel key
     Key,
     /// m - channel is in moderated mode
@@ -142,6 +144,7 @@ impl ModeType for ChannelMode {
             Ban | Exception
                 | Limit
                 | InviteException
+                | Reop
                 | Key
                 | Founder
                 | Admin
@@ -160,6 +163,7 @@ impl ModeType for ChannelMode {
             'l' => Limit,
             'i' => InviteOnly,
             'I' => InviteException,
+            'R' => Reop,
             'k' => Key,
             'm' => Moderated,
             'r' => RegisteredOnly,
@@ -189,6 +193,7 @@ impl fmt::Display for ChannelMode {
                 Limit => 'l',
                 InviteOnly => 'i',
                 InviteException => 'I',
+                Reop => 'R',
                 Key => 'k',
                 Moderated => 'm',
                 RegisteredOnly => 'r',
@@ -367,6 +372,49 @@ mod test {
             ),
             cmd
         );
+    }
+
+    #[test]
+    fn parse_channel_reop_mode() {
+        let cmd = "MODE #foo +R nick!user@host"
+            .parse::<Message>()
+            .unwrap()
+            .command;
+        assert_eq!(
+            Command::ChannelMODE(
+                "#foo".to_string(),
+                vec![Mode::Plus(
+                    ChannelMode::Reop,
+                    Some("nick!user@host".to_string())
+                )]
+            ),
+            cmd
+        );
+    }
+
+    #[test]
+    fn parse_channel_reop_mode_batch() {
+        let cmd = "MODE #foo +RRR a!*@* b!*@* c!*@*"
+            .parse::<Message>()
+            .unwrap()
+            .command;
+        assert_eq!(
+            Command::ChannelMODE(
+                "#foo".to_string(),
+                vec![
+                    Mode::Plus(ChannelMode::Reop, Some("a!*@*".to_string())),
+                    Mode::Plus(ChannelMode::Reop, Some("b!*@*".to_string())),
+                    Mode::Plus(ChannelMode::Reop, Some("c!*@*".to_string())),
+                ]
+            ),
+            cmd
+        );
+    }
+
+    #[test]
+    fn channel_registered_only_is_lowercase_r() {
+        assert_eq!(ChannelMode::RegisteredOnly.to_string(), "r");
+        assert_eq!(ChannelMode::Reop.to_string(), "R");
     }
 
     #[test]

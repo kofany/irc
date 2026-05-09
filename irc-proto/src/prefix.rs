@@ -18,8 +18,8 @@ impl Prefix {
     ///
     /// # Example
     /// ```
-    /// # extern crate irc_proto;
-    /// # use irc_proto::Prefix;
+    /// # extern crate irc_proto_repartee;
+    /// # use irc_proto_repartee::Prefix;
     /// # fn main() {
     /// Prefix::new_from_str("nickname!username@hostname");
     /// Prefix::new_from_str("example.com");

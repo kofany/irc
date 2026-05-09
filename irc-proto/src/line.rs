@@ -21,6 +21,9 @@ pub struct LineCodec {
 impl LineCodec {
     /// Creates a new instance of LineCodec from the specified encoding.
     pub fn new(label: &str) -> error::Result<LineCodec> {
+        #[cfg(not(feature = "encoding"))]
+        let _ = label;
+
         Ok(LineCodec {
             #[cfg(feature = "encoding")]
             encoding: match encoding_from_whatwg_label(label) {
